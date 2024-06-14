@@ -41,6 +41,7 @@ import org.vanilladb.core.server.VanillaDb;
 import org.vanilladb.core.sql.Constant;
 import org.vanilladb.core.storage.index.Index;
 import org.vanilladb.core.storage.index.SearchKey;
+import org.vanilladb.core.storage.index.ivf.IVFFlatIndex;
 import org.vanilladb.core.storage.metadata.index.IndexInfo;
 import org.vanilladb.core.storage.record.RecordId;
 import org.vanilladb.core.storage.tx.Transaction;
@@ -64,6 +65,7 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		}
 
 		// Insert the record into the record file
+		// TODO: logic to skip this if disk write becomes bottleneck
 		UpdateScan s = (UpdateScan) p.open();
 		s.insert();
 		for (Map.Entry<String, Constant> fldValPair : fldValMap.entrySet()) {
@@ -81,7 +83,10 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		
 		for (IndexInfo ii : indexes) {
 			Index idx = ii.open(tx);
-			idx.insert(new SearchKey(ii.fieldNames(), fldValMap), rid, true);
+			if (idx instanceof IVFFlatIndex)
+				idx.insert(new SearchKey(p.schema().fields(), fldValMap), rid, true);
+			else
+				idx.insert(new SearchKey(ii.fieldNames(), fldValMap), rid, true);
 			idx.close();
 		}
 		
@@ -97,7 +102,7 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		
 		// Create a IndexSelectPlan if there is matching index in the predicate
 		boolean usingIndex = false;
-		selectPlan = IndexSelector.selectByBestMatchedIndex(tblName, tp, data.pred(), tx);
+		selectPlan = IndexSelector.selectByBestMatchedIndex(tblName, tp, data.pred(), null, tx);
 		if (selectPlan == null)
 			selectPlan = new SelectPlan(tp, data.pred());
 		else {
@@ -166,7 +171,7 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		Plan selectPlan = null;
 		
 		// Create a IndexSelectPlan if there is matching index in the predicate
-		selectPlan = IndexSelector.selectByBestMatchedIndex(tblName, tp, data.pred(), tx, data.targetFields());
+		selectPlan = IndexSelector.selectByBestMatchedIndex(tblName, tp, data.pred(), null, tx, data.targetFields());
 		if (selectPlan == null)
 			selectPlan = new SelectPlan(tp, data.pred());
 		else

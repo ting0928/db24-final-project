@@ -26,14 +26,22 @@ import static org.vanilladb.core.sql.RecordComparator.DIR_DESC;
 import org.vanilladb.core.query.algebra.Plan;
 import org.vanilladb.core.query.algebra.Scan;
 import org.vanilladb.core.query.algebra.TablePlan;
+import org.vanilladb.core.query.algebra.UpdateScan;
 import org.vanilladb.core.query.parse.InsertData;
 import org.vanilladb.core.server.VanillaDb;
 import org.vanilladb.core.sql.Constant;
 import org.vanilladb.core.sql.Record;
 import org.vanilladb.core.sql.RecordComparator;
+import org.vanilladb.core.sql.Type;
 import org.vanilladb.core.sql.VectorConstant;
+import org.vanilladb.core.sql.VectorType;
 import org.vanilladb.core.sql.distfn.DistanceFn;
 import org.vanilladb.core.sql.distfn.EuclideanFn;
+import org.vanilladb.core.storage.buffer.EmptyPageFormatter;
+import org.vanilladb.core.storage.index.SearchKey;
+import org.vanilladb.core.storage.index.SearchKeyType;
+import org.vanilladb.core.storage.index.ivf.IVFFlatIndex;
+import org.vanilladb.core.storage.record.RecordId;
 import org.vanilladb.core.storage.tx.Transaction;
 
 public class StoredProcedureUtils {
@@ -45,6 +53,44 @@ public class StoredProcedureUtils {
 	
 	public static int executeUpdate(String sql, Transaction tx) {
 		return VanillaDb.newPlanner().executeUpdate(sql, tx);
+	}
+
+	public static void executeTrainIndex(String tableName, List<String> idxFields, String idxName, Transaction tx) {
+		// Obtain metadata about the index to be trained
+		IVFFlatIndex idx = (IVFFlatIndex)VanillaDb.catalogMgr().getIndexInfoByName(idxName, tx).open(tx);
+		String field = idxFields.get(0);
+		// Throws an exception if the type cast fails
+		Type idxType = (VectorType)VanillaDb.catalogMgr().getTableInfo(tableName, tx).schema().type(field);
+		int dim = idxType.getArgument();
+
+		for (int i = 0; i < IVFFlatIndex.numCentroidBlocks(new SearchKeyType(idxType)); ++i)
+			tx.bufferMgr().pinNew(idx.centroidName(), new EmptyPageFormatter());
+
+		// TODO: initialize the centroids in a better way
+		for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i)
+			idx.setCentroidVector(i, VectorConstant.normal(dim, 128, 64));
+
+		// TODO: refine the centroids by K-means. It is recommended to log each iteration
+
+		// Build the index
+		// Write the records into their corresponding clusters (tables)
+		Plan p = new TablePlan(tableName, tx);
+		UpdateScan s = (UpdateScan)p.open();
+		s.beforeFirst();
+		int i = 0;
+		System.err.print(i + "/900000\r");
+		while (s.next()) {
+			// Construct a map from field names to values
+			Map<String, Constant> fldValMap = new HashMap<String, Constant>();
+			for (String fldname : p.schema().fields())
+				fldValMap.put(fldname, s.getVal(fldname));
+			RecordId rid = s.getRecordId();
+
+			idx.insert(new SearchKey(p.schema().fields(), fldValMap), rid, false);
+			if (++i % 900 == 0)
+				System.err.print(i + "/900000\r");
+		}
+		s.close();
 	}
 
 	static class MapRecord implements Record{

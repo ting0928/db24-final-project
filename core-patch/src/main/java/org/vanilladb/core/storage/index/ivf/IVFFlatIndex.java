@@ -156,7 +156,7 @@ public class IVFFlatIndex extends Index {
                 probedClusters[i] = probedClusters[i - 1];
             }
             dists[i] = dist;
-            probedClusters[i] = currentBest.probedClusters[currentBest.probeId];
+            probedClusters[i] = currentBest.probedClusters[currentBest.probeId++];
         }
         probeId = 0;
     }
@@ -279,7 +279,7 @@ public class IVFFlatIndex extends Index {
         rf = ti.open(tx, false);
         rf.beforeFirst();
 
-        // log the lofical operation starts
+        // log the logical operation starts
         if (doLogicalLogging)
             tx.recoveryMgr().logLogicalStart();
         

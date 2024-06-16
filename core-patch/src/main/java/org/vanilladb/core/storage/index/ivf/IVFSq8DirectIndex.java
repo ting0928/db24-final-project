@@ -48,9 +48,9 @@ public class IVFSq8DirectIndex extends Index {
 
     static {
         NUM_CENTROIDS = CoreProperties.getLoader().getPropertyAsInteger(
-                IVFSq8DirectIndex.class.getName() + ".NUM_CENTROIDS", 512);
+                IVFSq8DirectIndex.class.getName() + ".NUM_CENTROIDS", 16384);
         NUM_PROBE_BUCKETS = CoreProperties.getLoader().getPropertyAsInteger(
-                IVFSq8DirectIndex.class.getName() + ".NUM_PROBE_BUCKETS", 8);
+                IVFSq8DirectIndex.class.getName() + ".NUM_PROBE_BUCKETS", 2);
     }
 
     public static int numCentroidBlocks(SearchKeyType keyType) {

@@ -41,7 +41,7 @@ import org.vanilladb.core.server.VanillaDb;
 import org.vanilladb.core.sql.Constant;
 import org.vanilladb.core.storage.index.Index;
 import org.vanilladb.core.storage.index.SearchKey;
-import org.vanilladb.core.storage.index.ivf.IVFFlatIndex;
+import org.vanilladb.core.storage.index.ivf.IVFSq8DirectIndex;
 import org.vanilladb.core.storage.metadata.index.IndexInfo;
 import org.vanilladb.core.storage.record.RecordId;
 import org.vanilladb.core.storage.tx.Transaction;
@@ -65,7 +65,6 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		}
 
 		// Insert the record into the record file
-		// TODO: logic to skip this if disk write becomes bottleneck
 		UpdateScan s = (UpdateScan) p.open();
 		s.insert();
 		for (Map.Entry<String, Constant> fldValPair : fldValMap.entrySet()) {
@@ -83,7 +82,7 @@ public class IndexUpdatePlanner implements UpdatePlanner {
 		
 		for (IndexInfo ii : indexes) {
 			Index idx = ii.open(tx);
-			if (idx instanceof IVFFlatIndex)
+			if (idx instanceof IVFSq8DirectIndex)
 				idx.insert(new SearchKey(p.schema().fields(), fldValMap), rid, true);
 			else
 				idx.insert(new SearchKey(ii.fieldNames(), fldValMap), rid, true);

@@ -76,6 +76,16 @@ public class VectorConstant extends Constant implements Serializable {
         type = new VectorType(v.dimension());
     }
 
+    public VectorConstant(ByteVectorConstant v) {
+        // Direct SQ8 decoding
+        vec = new float[v.dimension()];
+        int i = 0;
+        for (byte e : v.asJavaVal()) {
+            vec[i++] = e + 128;
+        }
+        type = new VectorType(v.dimension());
+    }
+
     public VectorConstant(String vectorString) {
         String[] split = vectorString.split(" ");
 
@@ -163,6 +173,8 @@ public class VectorConstant extends Constant implements Serializable {
     public Constant castTo(Type type) {
         if (getType().equals(type))
             return this;
+        if (type instanceof ByteVectorType)
+            return new ByteVectorConstant(this);
         switch (type.getSqlType()) {
             case VARCHAR:
                 return new VarcharConstant(toString(), type);

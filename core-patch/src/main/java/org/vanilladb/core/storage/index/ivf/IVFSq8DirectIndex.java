@@ -2,10 +2,18 @@ package org.vanilladb.core.storage.index.ivf;
 
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import static org.vanilladb.core.sql.Type.BIGINT;
+import static org.vanilladb.core.sql.Type.INTEGER;
 
 import org.vanilladb.core.server.VanillaDb;
 import org.vanilladb.core.server.task.Task;
+import org.vanilladb.core.sql.BigIntConstant;
+import org.vanilladb.core.sql.ByteVectorConstant;
 import org.vanilladb.core.sql.Constant;
+import org.vanilladb.core.sql.IntegerConstant;
 import org.vanilladb.core.sql.Schema;
 import org.vanilladb.core.sql.Type;
 import org.vanilladb.core.sql.VectorConstant;
@@ -25,7 +33,13 @@ import org.vanilladb.core.storage.tx.Transaction;
 import org.vanilladb.core.util.ByteHelper;
 import org.vanilladb.core.util.CoreProperties;
 
-public class IVFFlatIndex extends Index {
+public class IVFSq8DirectIndex extends Index {
+    private static Logger logger = Logger.getLogger(IVFSq8DirectIndex.class.getName());
+
+    /**
+     * A field name of the schema of index records.
+     */
+    private static final String SCHEMA_RID_BLOCK = "block", SCHEMA_RID_ID = "id";
 
     public final static int NUM_CENTROIDS;
     public final static int NUM_PROBE_BUCKETS;
@@ -34,15 +48,15 @@ public class IVFFlatIndex extends Index {
 
     static {
         NUM_CENTROIDS = CoreProperties.getLoader().getPropertyAsInteger(
-                IVFFlatIndex.class.getName() + ".NUM_CENTROIDS", 512);
+                IVFSq8DirectIndex.class.getName() + ".NUM_CENTROIDS", 16384);
         NUM_PROBE_BUCKETS = CoreProperties.getLoader().getPropertyAsInteger(
-                IVFFlatIndex.class.getName() + ".NUM_PROBE_BUCKETS", 8);
+                IVFSq8DirectIndex.class.getName() + ".NUM_PROBE_BUCKETS", 2);
     }
 
     public static int numCentroidBlocks(SearchKeyType keyType) {
         // TODO: I thought Buffer.BUFFER_SIZE equals Page.BLOCK_SIZE.
         int fpb = Buffer.BUFFER_SIZE / ByteHelper.FLOAT_SIZE;
-        return (IVFFlatIndex.NUM_CENTROIDS * keyType.get(0).getArgument() + fpb - 1) / fpb;
+        return (IVFSq8DirectIndex.NUM_CENTROIDS * keyType.get(0).getArgument() + fpb - 1) / fpb;
     }
 
     public static long searchCost(SearchKeyType keyType, long totRecs, long matchRecs) {
@@ -64,8 +78,8 @@ public class IVFFlatIndex extends Index {
             this.distFn = distFn;
             this.probeCount = probeCount;
             this.doneSignal = doneSignal;
-            low = n * IVFFlatIndex.NUM_CENTROIDS / PROBE_THREADS;
-            high = (n + 1) * IVFFlatIndex.NUM_CENTROIDS / PROBE_THREADS;
+            low = n * IVFSq8DirectIndex.NUM_CENTROIDS / PROBE_THREADS;
+            high = (n + 1) * IVFSq8DirectIndex.NUM_CENTROIDS / PROBE_THREADS;
             dists = new double[probeCount];
             probedClusters = new int[probeCount];
             probeId = 0;
@@ -157,7 +171,7 @@ public class IVFFlatIndex extends Index {
             probeId = -1;
             return;
         }
-        if (probeCount > IVFFlatIndex.NUM_CENTROIDS)
+        if (probeCount > IVFSq8DirectIndex.NUM_CENTROIDS)
             throw new RuntimeException();
         EuclideanFn distFn = new EuclideanFn(ii.fieldNames().get(0));
         distFn.setQueryVector(query);
@@ -198,14 +212,22 @@ public class IVFFlatIndex extends Index {
     }
 
 	private SearchKey searchKey;
-    private Schema tableSchema;
+    private Schema tableSchema, sq8DirectSchema;
     private RecordFile rf;
     private int[] probedClusters;
     private int probeId;
 
-    public IVFFlatIndex(IndexInfo ii, SearchKeyType keyType, Schema schema, Transaction tx) {
+    public IVFSq8DirectIndex(IndexInfo ii, SearchKeyType keyType, Schema schema, Transaction tx) {
         super(ii, keyType, tx);
         tableSchema = schema;
+        sq8DirectSchema = new Schema();
+        for (String fldname : tableSchema.fields())
+            if (tableSchema.type(fldname) instanceof VectorType)
+                sq8DirectSchema.addField(fldname, Type.BYTEVECTOR(tableSchema.type(fldname).getArgument()));
+            else
+                sq8DirectSchema.addField(fldname, tableSchema.type(fldname));
+        sq8DirectSchema.addField(SCHEMA_RID_BLOCK, BIGINT);
+        sq8DirectSchema.addField(SCHEMA_RID_ID, INTEGER);
         probeId = -1;
     }
 
@@ -216,7 +238,7 @@ public class IVFFlatIndex extends Index {
         searchKey = searchRange.asSearchKey();
         probe((VectorConstant)searchKey.get(0), NUM_PROBE_BUCKETS);
         String tblname = ii.indexName() + probedClusters[0];
-        TableInfo ti = new TableInfo(tblname, tableSchema);
+        TableInfo ti = new TableInfo(tblname, sq8DirectSchema);
 
         // the underlying record file should not perform logging
         rf = ti.open(tx, false);
@@ -241,7 +263,7 @@ public class IVFFlatIndex extends Index {
             }
 
             String tblname = ii.indexName() + probedClusters[probeId];
-            TableInfo ti = new TableInfo(tblname, tableSchema);
+            TableInfo ti = new TableInfo(tblname, sq8DirectSchema);
 
             // the underlying record file should not perform logging
             rf = ti.open(tx, false);
@@ -251,13 +273,14 @@ public class IVFFlatIndex extends Index {
                 RecordFile.formatFileHeader(ti.fileName(), tx);
             rf.beforeFirst();
         }
-        // System.err.println("next returning true");
         return true;
     }
 
     @Override
     public RecordId getDataRecordId() {
-        return rf.currentRecordId();
+        long blkNum = (Long) rf.getVal(SCHEMA_RID_BLOCK).asJavaVal();
+        int id = (Integer) rf.getVal(SCHEMA_RID_ID).asJavaVal();
+        return new RecordId(new BlockId(dataFileName, blkNum), id);
     }
 
     @Override
@@ -272,7 +295,7 @@ public class IVFFlatIndex extends Index {
         if (probeId == -1) return;  // Still loading testbed
 
         String tblname = ii.indexName() + probedClusters[0];
-        TableInfo ti = new TableInfo(tblname, tableSchema);
+        TableInfo ti = new TableInfo(tblname, sq8DirectSchema);
 
         // the underlying record file should not perform logging
         rf = ti.open(tx, false);
@@ -290,8 +313,15 @@ public class IVFFlatIndex extends Index {
         i = 0;
         rf.insert();
         for (String fldname : tableSchema.fields()) {
-            rf.setVal(fldname, key.get(i++));
+            Constant c = key.get(i++);
+            if (c instanceof VectorConstant)
+                rf.setVal(fldname, new ByteVectorConstant((VectorConstant)c));
+            else
+                rf.setVal(fldname, c);
         }
+        rf.setVal(SCHEMA_RID_BLOCK, new BigIntConstant(dataRecordId.block()
+                .number()));
+        rf.setVal(SCHEMA_RID_ID, new IntegerConstant(dataRecordId.id()));
 
         // log the logical operation ends
         if (doLogicalLogging)
@@ -308,7 +338,7 @@ public class IVFFlatIndex extends Index {
         if (probeId == -1) return;  // Probably won't happen
 
         String tblname = ii.indexName() + probedClusters[0];
-        TableInfo ti = new TableInfo(tblname, tableSchema);
+        TableInfo ti = new TableInfo(tblname, sq8DirectSchema);
         if (VanillaDb.fileMgr().isFileEmpty(ti.fileName())) return;
 
         // the underlying record file should not perform logging
@@ -326,8 +356,8 @@ public class IVFFlatIndex extends Index {
                 break;
             }
         
-        if (probeId == probedClusters.length)
-            System.err.println("Warning: IVF_FLAT delete failed to delete a record");
+        if (probeId == probedClusters.length && logger.isLoggable(Level.WARNING))
+            logger.warning("IVF_SQ8_DIRECT delete failed to delete a record");
 
         // log the logical operation ends
         if (doLogicalLogging)
@@ -357,7 +387,10 @@ public class IVFFlatIndex extends Index {
     }
 
     public Constant getVal(String fldName) {
-        return rf.getVal(fldName);
+        Constant c = rf.getVal(fldName);
+        if (c instanceof ByteVectorConstant)
+            return new VectorConstant((ByteVectorConstant)c);
+        return c;
     }
 
 }

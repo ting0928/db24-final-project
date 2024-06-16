@@ -42,7 +42,7 @@ import org.vanilladb.core.sql.distfn.EuclideanFn;
 import org.vanilladb.core.storage.buffer.EmptyPageFormatter;
 import org.vanilladb.core.storage.index.SearchKey;
 import org.vanilladb.core.storage.index.SearchKeyType;
-import org.vanilladb.core.storage.index.ivf.IVFFlatIndex;
+import org.vanilladb.core.storage.index.ivf.IVFSq8DirectIndex;
 import org.vanilladb.core.storage.record.RecordId;
 import org.vanilladb.core.storage.tx.Transaction;
 
@@ -59,21 +59,18 @@ public class StoredProcedureUtils {
 
 	public static void executeTrainIndex(String tableName, List<String> idxFields, String idxName, Transaction tx) {
 		// Obtain metadata about the index to be trained
-		IVFFlatIndex idx = (IVFFlatIndex)VanillaDb.catalogMgr().getIndexInfoByName(idxName, tx).open(tx);
+		IVFSq8DirectIndex idx = (IVFSq8DirectIndex)VanillaDb.catalogMgr().getIndexInfoByName(idxName, tx).open(tx);
 		String field = idxFields.get(0);
 		// Throws an exception if the type cast fails
 		Type idxType = (VectorType)VanillaDb.catalogMgr().getTableInfo(tableName, tx).schema().type(field);
 		int dim = idxType.getArgument();
 
-		for (int i = 0; i < IVFFlatIndex.numCentroidBlocks(new SearchKeyType(idxType)); ++i)
+		for (int i = 0; i < IVFSq8DirectIndex.numCentroidBlocks(new SearchKeyType(idxType)); ++i)
 			tx.bufferMgr().pinNew(idx.centroidName(), new EmptyPageFormatter());
 
-		// TODO: initialize the centroids in a better way
-		// for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i)
-		// 	idx.setCentroidVector(i, VectorConstant.normal(dim, 128, 64));
 		RandomNonRepeatGenerator RNRG = new RandomNonRepeatGenerator(SiftBenchConstants.NUM_ITEMS);
 		Map<Integer, Integer> M = new HashMap<>();
-		for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i){
+		for (int i = 0; i < IVFSq8DirectIndex.NUM_CENTROIDS; ++i){
 			int random_number = RNRG.next();
 			M.put(random_number,i);
 		}
@@ -90,7 +87,6 @@ public class StoredProcedureUtils {
 		}
 		test_ts.close();
 
-		// TODO: refine the centroids by K-means. It is recommended to log each iteration
 		int iteration = 2;
 
 		for (int i = 0; i < iteration; i++){
@@ -98,12 +94,12 @@ public class StoredProcedureUtils {
 			Plan tp = new TablePlan(tableName, tx);
 			Scan ts = tp.open();
 			
-			VectorConstant[] sum = new VectorConstant[IVFFlatIndex.NUM_CENTROIDS];
-			for (int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
-				sum[j] =  VectorConstant.zeros(128);
+			VectorConstant[] sum = new VectorConstant[IVFSq8DirectIndex.NUM_CENTROIDS];
+			for (int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+				sum[j] =  VectorConstant.zeros(dim);
 			}
 
-			int [] num_of_points = new int[IVFFlatIndex.NUM_CENTROIDS];
+			int [] num_of_points = new int[IVFSq8DirectIndex.NUM_CENTROIDS];
 
 			//cluster the data points
 			ts.beforeFirst();
@@ -120,32 +116,30 @@ public class StoredProcedureUtils {
 				int belongsTo = 0;
 
 				EuclideanFn fn = new EuclideanFn("i_emb"); //i don't know wtf
-				for (int j  = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+				fn.setQueryVector(temp);
+				for (int j  = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
 					VectorConstant center = idx.getCentroidVector(j);
-					fn.setQueryVector(temp);
-					float distance = (float)fn.calculateDistance(center);
+					float distance = (float)fn.distance(center);
  					if( distance < min_dist){
 						min_dist = distance;
 						belongsTo = j;
 					}
-					if (j == IVFFlatIndex.NUM_CENTROIDS - 1)
-						break;
 				}
 
 				num_of_points[belongsTo]++;
 				sum[belongsTo] = (VectorConstant)sum[belongsTo].add(temp);
 
-				if ((Integer)ts.getVal("i_id").asJavaVal() % 900 == 0)
-					System.err.print((Integer)ts.getVal("i_id").asJavaVal() + "/900000\r");
+				// if ((Integer)ts.getVal("i_id").asJavaVal() % 900 == 0)
+				// 	System.err.print((Integer)ts.getVal("i_id").asJavaVal() + "/900000\r");
 
 			}
 
 			//Update centroid
-			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
-				System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
+			for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+				// System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
 				sum[j] = (VectorConstant)sum[j].div_by_int(num_of_points[j]);
 			}
-			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+			for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
 				idx.setCentroidVector(j, sum[j]);
 			}
 			
@@ -157,8 +151,8 @@ public class StoredProcedureUtils {
 		Plan p = new TablePlan(tableName, tx);
 		UpdateScan s = (UpdateScan)p.open();
 		s.beforeFirst();
-		int i = 0;
-		System.err.print(i + "/900000\r");
+		// int i = 0;
+		// System.err.print(i + "/900000\r");
 		while (s.next()) {
 			// Construct a map from field names to values
 			Map<String, Constant> fldValMap = new HashMap<String, Constant>();
@@ -167,8 +161,8 @@ public class StoredProcedureUtils {
 			RecordId rid = s.getRecordId();
 
 			idx.insert(new SearchKey(p.schema().fields(), fldValMap), rid, false);
-			if (++i % 900 == 0)
-				System.err.print(i + "/900000\r");
+			// if (++i % 900 == 0)
+			// 	System.err.print(i + "/900000\r");
 		}
 		s.close();
 	}

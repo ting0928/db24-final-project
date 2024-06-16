@@ -104,31 +104,35 @@ public class StoredProcedureUtils {
 			System.err.print("Iteration " + i + "\n");
 			Plan tp = new TablePlan(tableName, tx);
 			Scan ts = tp.open();
-
-			float[][] sum;
-			sum = new float[IVFFlatIndex.NUM_CENTROIDS][128];
 			
-			int [] num_of_points;
-			num_of_points = new int[512];
+			VectorConstant[] sum = new VectorConstant[IVFFlatIndex.NUM_CENTROIDS];
+			for (int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+				sum[j] =  VectorConstant.zeros(128);
+			}
+
+			int [] num_of_points = new int[512];
 
 			//cluster the data points
 			ts.beforeFirst();
 			while(ts.next()){
-				float[] temp = new float[128];	// a copy of a record of the table
+				VectorConstant temp;	// a copy of a record of the table
 
 				// Two field:
 				// 1: i_emb(VectorConstant) 
 				// 2: i_id(IntegerConstant)
 
-				temp = (float[])ts.getVal("i_emb").asJavaVal();
+				temp = (VectorConstant)ts.getVal("i_emb");
 
 				float min_dist = Float.MAX_VALUE;
 				int belongsTo = 0;
 
+				EuclideanFn fn = new EuclideanFn("i_emb"); //i don't know wtf
 				for (int j  = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
-					float[] center = (float[])idx.getCentroidVector(j).asJavaVal();
-					if(calculateEuclideanDistance(center, temp) < min_dist){
-						min_dist = calculateEuclideanDistance(center, temp);
+					VectorConstant center = idx.getCentroidVector(j);
+					fn.setQueryVector(temp);
+					float distance = (float)fn.calculateDistance(center);
+ 					if( distance < min_dist){
+						min_dist = distance;
 						belongsTo = j;
 					}
 					if (j == 511)
@@ -136,9 +140,7 @@ public class StoredProcedureUtils {
 				}
 
 				num_of_points[belongsTo]++;
-				for (int j = 0; j < 128; j++){
-					sum[belongsTo][j] += temp[j];
-				}
+				sum[belongsTo] = (VectorConstant)sum[belongsTo].add(temp);
 
 				if ((Integer)ts.getVal("i_id").asJavaVal() % 900 == 0)
 					System.err.print((Integer)ts.getVal("i_id").asJavaVal() + "/900000\r");
@@ -148,13 +150,10 @@ public class StoredProcedureUtils {
 			//Update centroid
 			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
 				System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
-				for(int k = 0; k < 128; k++){
-					sum[j][k] = sum[j][k]/num_of_points[j];
-				}
+				sum[j] = (VectorConstant)sum[j].div_by_int(num_of_points[j]);
 			}
 			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
-				VectorConstant v = new VectorConstant(sum[j]);
-				idx.setCentroidVector(j, v);
+				idx.setCentroidVector(j, sum[j]);
 			}
 			
 			ts.close();
@@ -275,21 +274,4 @@ public class StoredProcedureUtils {
 	public static int executeInsert(InsertData sql, Transaction tx) {
 		return VanillaDb.newPlanner().executeInsert(sql, tx);
 	}
-
-	public static float calculateEuclideanDistance(float[] array1, float[] array2) {
-        // 檢查兩個陣列的長度是否相同
-        if (array1.length != array2.length) {
-            throw new IllegalArgumentException("兩個陣列的長度必須相同");
-        }
-
-        // 計算平方差的和
-        float sum = 0.0f;
-        for (int i = 0; i < array1.length; i++) {
-            float diff = array1[i] - array2[i];
-            sum += diff * diff;
-        }
-
-        // 返回平方根
-        return (float)Math.sqrt(sum);
-    }
 }

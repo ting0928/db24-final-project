@@ -9,7 +9,7 @@ public class EuclideanFn extends DistanceFn {
     }
 
     @Override
-    protected double calculateDistance(VectorConstant vec) {
+    public double calculateDistance(VectorConstant vec) {
         double sum = 0;
         for (int i = 0; i < vec.dimension(); i++) {
             double diff = query.get(i) - vec.get(i);

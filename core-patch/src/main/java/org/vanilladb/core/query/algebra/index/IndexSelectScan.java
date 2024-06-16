@@ -21,7 +21,7 @@ import org.vanilladb.core.query.algebra.UpdateScan;
 import org.vanilladb.core.sql.Constant;
 import org.vanilladb.core.storage.index.Index;
 import org.vanilladb.core.storage.index.SearchRange;
-import org.vanilladb.core.storage.index.ivf.IVFFlatIndex;
+import org.vanilladb.core.storage.index.ivf.IVFSq8DirectIndex;
 import org.vanilladb.core.storage.record.RecordId;
 
 /**
@@ -47,7 +47,7 @@ public class IndexSelectScan implements UpdateScan {
 		this.idx = idx;
 		this.searchRange = searchRange;
 		this.ts = ts;
-		readIdx = idx instanceof IVFFlatIndex;
+		readIdx = idx instanceof IVFSq8DirectIndex;
 	}
 
 	/**
@@ -99,7 +99,7 @@ public class IndexSelectScan implements UpdateScan {
 	 */
 	@Override
 	public Constant getVal(String fldName) {
-		if (readIdx) return ((IVFFlatIndex)idx).getVal(fldName);
+		if (readIdx) return ((IVFSq8DirectIndex)idx).getVal(fldName);
 		return ts.getVal(fldName);
 	}
 
@@ -134,7 +134,7 @@ public class IndexSelectScan implements UpdateScan {
 
 	@Override
 	public RecordId getRecordId() {
-		if (readIdx) return ((IVFFlatIndex)idx).getDataRecordId();
+		if (readIdx) return ((IVFSq8DirectIndex)idx).getDataRecordId();
 		return ts.getRecordId();
 	}
 

@@ -12,7 +12,7 @@ public class EuclideanFn extends DistanceFn {
     }
 
     @Override
-    public double calculateDistance(VectorConstant vec) {
+    protected double calculateDistance(VectorConstant vec) {
         int i = 0;
         FloatVector sum = FloatVector.zero(SPECIES);
         for (; i < SPECIES.loopBound(vec.dimension()); i += SPECIES.length()) {

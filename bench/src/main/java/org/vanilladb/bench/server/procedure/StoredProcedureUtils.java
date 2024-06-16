@@ -90,7 +90,7 @@ public class StoredProcedureUtils {
 		//----------------------------------------------------------------------------------------------
 
 		//Refine centroids------------------------------------------------------------------------------
-		int iteration = 2;
+		int iteration = 1;
 
 		for (int i = 0; i < iteration; i++){
 			System.err.print("Iteration " + i + "\n");

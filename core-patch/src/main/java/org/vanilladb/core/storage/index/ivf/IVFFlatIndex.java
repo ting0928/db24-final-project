@@ -1,12 +1,15 @@
 package org.vanilladb.core.storage.index.ivf;
 
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 
 import org.vanilladb.core.server.VanillaDb;
 import org.vanilladb.core.server.task.Task;
 import org.vanilladb.core.sql.Constant;
 import org.vanilladb.core.sql.Schema;
+import org.vanilladb.core.sql.Type;
 import org.vanilladb.core.sql.VectorConstant;
+import org.vanilladb.core.sql.VectorType;
 import org.vanilladb.core.sql.distfn.EuclideanFn;
 import org.vanilladb.core.storage.buffer.Buffer;
 import org.vanilladb.core.storage.file.BlockId;
@@ -19,6 +22,7 @@ import org.vanilladb.core.storage.metadata.index.IndexInfo;
 import org.vanilladb.core.storage.record.RecordFile;
 import org.vanilladb.core.storage.record.RecordId;
 import org.vanilladb.core.storage.tx.Transaction;
+import org.vanilladb.core.util.ByteHelper;
 import org.vanilladb.core.util.CoreProperties;
 
 public class IVFFlatIndex extends Index {
@@ -37,10 +41,8 @@ public class IVFFlatIndex extends Index {
 
     public static int numCentroidBlocks(SearchKeyType keyType) {
         // TODO: I thought Buffer.BUFFER_SIZE equals Page.BLOCK_SIZE.
-        // They are not. So each buffer can store at most 7 vectors instead of 8.
-        // I am planning to flatten
-        int vpb = Buffer.BUFFER_SIZE / keyType.get(0).maxSize();
-        return (IVFFlatIndex.NUM_CENTROIDS + vpb - 1) / vpb;
+        int fpb = Buffer.BUFFER_SIZE / ByteHelper.FLOAT_SIZE;
+        return (IVFFlatIndex.NUM_CENTROIDS * keyType.get(0).getArgument() + fpb - 1) / fpb;
     }
 
     public static long searchCost(SearchKeyType keyType, long totRecs, long matchRecs) {
@@ -98,22 +100,56 @@ public class IVFFlatIndex extends Index {
     }
 
     public VectorConstant getCentroidVector(int bucket) {
-        int vpb = Buffer.BUFFER_SIZE / keyType.get(0).maxSize();
-        int offset = bucket % vpb * keyType.get(0).maxSize();
-        Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), bucket / vpb));
-        VectorConstant v = (VectorConstant)buff.getVal(offset, keyType.get(0));
-        tx.bufferMgr().unpin(buff);
-        return v;
+        int fpb = Buffer.BUFFER_SIZE / ByteHelper.FLOAT_SIZE;
+        VectorType T = (VectorType)keyType.get(0);
+        int dimension = T.getArgument();
+        int id0 = bucket * dimension, id1 = (bucket + 1) * dimension;
+        int blkNum0 = id0 / fpb, blkNum1 = (id1 - 1) / fpb;
+        if (blkNum0 == blkNum1) {
+            int offset = id0 % fpb * ByteHelper.FLOAT_SIZE;
+            Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum0));
+            VectorConstant v = (VectorConstant)buff.getVal(offset, T);
+            tx.bufferMgr().unpin(buff);
+            return v;
+        } else {
+            int sz0 = fpb - id0 % fpb, sz1 = dimension - sz0;
+            Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum0));
+            float[] a = new float[dimension];
+            VectorConstant tmp = (VectorConstant)buff.getVal(
+                Buffer.BUFFER_SIZE - Type.VECTOR(sz0).maxSize(), Type.VECTOR(sz0));
+            tx.bufferMgr().unpin(buff);
+            System.arraycopy(tmp.asJavaVal(), 0, a, 0, sz0);
+
+            buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum1));
+            tmp = (VectorConstant)buff.getVal(0, Type.VECTOR(sz1));
+            tx.bufferMgr().unpin(buff);
+            System.arraycopy(tmp.asJavaVal(), 0, a, sz0, sz1);
+            return new VectorConstant(a);
+        }
     }
 
     public void setCentroidVector(int bucket, VectorConstant centroid) {
-        int vpb = Buffer.BUFFER_SIZE / keyType.get(0).maxSize();
-        int offset = bucket % vpb * keyType.get(0).maxSize();
-        Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), bucket / vpb));
-        // We assume this method is only called in Load Testbed
-        // So the concurrency manager and LSN do not need to be involved
-        buff.setVal(offset, centroid, tx.getTransactionNumber(), null);
-        tx.bufferMgr().unpin(buff);
+        int fpb = Buffer.BUFFER_SIZE / ByteHelper.FLOAT_SIZE;
+        int dimension = ((VectorType)keyType.get(0)).getArgument();
+        int id0 = bucket * dimension, id1 = (bucket + 1) * dimension;
+        int blkNum0 = id0 / fpb, blkNum1 = (id1 - 1) / fpb;
+        if (blkNum0 == blkNum1) {
+            int offset = id0 % fpb * ByteHelper.FLOAT_SIZE;
+            Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum0));
+            buff.setVal(offset, centroid, tx.getTransactionNumber(), null);
+            tx.bufferMgr().unpin(buff);
+        } else {
+            int sz0 = fpb - id0 % fpb;
+            VectorConstant tmp = new VectorConstant(Arrays.copyOfRange(centroid.asJavaVal(), 0, sz0));
+            Buffer buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum0));
+            buff.setVal(Buffer.BUFFER_SIZE - tmp.size(), tmp, tx.getTransactionNumber(), null);
+            tx.bufferMgr().unpin(buff);
+
+            tmp = new VectorConstant(Arrays.copyOfRange(centroid.asJavaVal(), sz0, dimension));
+            buff = tx.bufferMgr().pin(new BlockId(centroidName(), blkNum1));
+            buff.setVal(0, tmp, tx.getTransactionNumber(), null);
+            tx.bufferMgr().unpin(buff);
+        }
     }
 
     private void probe(VectorConstant query, int probeCount) {
@@ -272,8 +308,8 @@ public class IVFFlatIndex extends Index {
         if (probeId == -1) return;  // Probably won't happen
 
         String tblname = ii.indexName() + probedClusters[0];
-        if (VanillaDb.fileMgr().isFileEmpty(tblname)) return;
         TableInfo ti = new TableInfo(tblname, tableSchema);
+        if (VanillaDb.fileMgr().isFileEmpty(ti.fileName())) return;
 
         // the underlying record file should not perform logging
         rf = ti.open(tx, false);

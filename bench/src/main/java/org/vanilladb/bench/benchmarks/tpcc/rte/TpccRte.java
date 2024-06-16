@@ -35,7 +35,7 @@ public class TpccRte extends RemoteTerminalEmulator<TpccTransactionType> {
 
 	public TpccRte(SutConnection conn, StatisticMgr statMgr, long sleepTime,
 			int homeWarehouseId) {
-		super(conn, statMgr, sleepTime);
+		super(conn, statMgr, sleepTime, null);
 		homeWid = homeWarehouseId;
 		executors = new HashMap<BenchTransactionType, TpccTxExecutor>();
 		executors.put(TpccTransactionType.NEW_ORDER, new TpccTxExecutor(new NewOrderParamGen(homeWid)));

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 
 import org.vanilladb.bench.StatisticMgr;
 import org.vanilladb.bench.benchmarks.sift.SiftBenchConstants;
@@ -31,8 +32,8 @@ public class SiftRte extends RemoteTerminalEmulator<SiftTransactionType> {
     static Map<VectorConstant, Integer> insertMap = new ConcurrentHashMap<>();
     static CopyOnWriteArrayList<Object[]> insertHistory = new CopyOnWriteArrayList<>();
 
-    public SiftRte(SutConnection conn, StatisticMgr statMgr, long sleepTime) {
-        super(conn, statMgr, sleepTime);
+    public SiftRte(SutConnection conn, StatisticMgr statMgr, long sleepTime, CountDownLatch siftLock) {
+        super(conn, statMgr, sleepTime, siftLock);
     }
 
     @Override

@@ -3,6 +3,7 @@ package org.vanilladb.bench.benchmarks.sift;
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 import org.vanilladb.bench.BenchTransactionType;
 import org.vanilladb.bench.Benchmark;
@@ -49,7 +50,10 @@ public class SiftBenchmark extends Benchmark {
 
     @Override
     public RemoteTerminalEmulator<?> createRte(SutConnection conn, StatisticMgr statMgr, long rteSleepTime) {
-        return new SiftRte(conn, statMgr, rteSleepTime);
+        return new SiftRte(conn, statMgr, rteSleepTime, null);
+    }
+    public RemoteTerminalEmulator<?> createRte(SutConnection conn, StatisticMgr statMgr, long rteSleepTime, CountDownLatch siftLock) {
+        return new SiftRte(conn, statMgr, rteSleepTime, siftLock);
     }
 
     @Override

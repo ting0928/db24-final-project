@@ -15,6 +15,7 @@
  *******************************************************************************/
 package org.vanilladb.bench.rte;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.vanilladb.bench.BenchTransactionType;
@@ -34,12 +35,14 @@ public abstract class RemoteTerminalEmulator<T extends BenchTransactionType> ext
 	private SutConnection conn;
 	protected StatisticMgr statMgr;
 	private long sleepTime;
+	private CountDownLatch siftLock;
 	
 	public RemoteTerminalEmulator(SutConnection conn, StatisticMgr statMgr,
-			long sleepTime) {
+			long sleepTime, CountDownLatch siftLock) {
 		this.conn = conn;
 		this.statMgr = statMgr;
 		this.sleepTime = sleepTime;
+		this.siftLock = siftLock;
 		
 		// Set the thread name
 		rteId = rteCount.getAndIncrement();
@@ -85,6 +88,7 @@ public abstract class RemoteTerminalEmulator<T extends BenchTransactionType> ext
 	private TxnResultSet executeTxnCycle(SutConnection conn) {
 		T txType = getNextTxType();
 		TransactionExecutor<T> executor = getTxExeutor(txType);
+		if (siftLock != null) siftLock.countDown();
 		if (executor instanceof AnnTxExecutor)
 			((AnnTxExecutor) executor).setWarmingUp(isWarmingUp);
 		return executor.execute(conn);

@@ -26,7 +26,7 @@ public class AnnRte extends RemoteTerminalEmulator<AnnTransactionType>{
     public static Map<VectorConstant, Set<Integer>> resultMap = new ConcurrentHashMap<>();
 
     public AnnRte(SutConnection conn, StatisticMgr statMgr, long sleepTime) {
-        super(conn, statMgr, sleepTime);
+        super(conn, statMgr, sleepTime, null);
         
         executor = new AnnTxExecutor(new AnnParamGen(), resultMap);
     }

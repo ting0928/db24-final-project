@@ -2,6 +2,7 @@ package org.vanilladb.bench;
 
 import java.sql.SQLException;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -83,11 +84,12 @@ public class VanillaBench {
 			StatisticMgr statMgr = newStatisticMgr(benchmarker);
 			int rteCount = benchmarker.getNumOfRTEs();
 			RemoteTerminalEmulator<?>[] emulators = new RemoteTerminalEmulator[rteCount];
-			emulators[0] = benchmarker.createRte(conn, statMgr,
-					VanillaBenchParameters.RTE_SLEEP_TIME); // Reuse the connection
+			CountDownLatch siftLock = new CountDownLatch(1);
+			emulators[0] = ((SiftBenchmark)benchmarker).createRte(conn, statMgr,
+					VanillaBenchParameters.RTE_SLEEP_TIME, siftLock); // Reuse the connection
 			for (int i = 1; i < emulators.length; i++)
-				emulators[i] = benchmarker.createRte(getConnection(), statMgr,
-						VanillaBenchParameters.RTE_SLEEP_TIME);
+				emulators[i] = ((SiftBenchmark)benchmarker).createRte(getConnection(), statMgr,
+						VanillaBenchParameters.RTE_SLEEP_TIME, siftLock);
 
 			if (logger.isLoggable(Level.INFO))
 				logger.info("waiting for connections...");
@@ -96,12 +98,15 @@ public class VanillaBench {
 			// Wait for connections
 			Thread.sleep(1500);
 
-			if (logger.isLoggable(Level.INFO))
-				logger.info("start benchmarking.");
-
 			// Start the execution of the RTEs
 			for (int i = 0; i < emulators.length; i++)
 				emulators[i].start();
+
+			// Wait until sift loading finishes
+			siftLock.await();
+
+			if (logger.isLoggable(Level.INFO))
+				logger.info("start benchmarking.");
 
 			// Waits for the warming up finishes
 			Thread.sleep(VanillaBenchParameters.WARM_UP_INTERVAL);

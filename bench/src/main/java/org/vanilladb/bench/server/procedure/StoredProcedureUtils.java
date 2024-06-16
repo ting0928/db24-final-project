@@ -68,6 +68,7 @@ public class StoredProcedureUtils {
 		for (int i = 0; i < IVFSq8DirectIndex.numCentroidBlocks(new SearchKeyType(idxType)); ++i)
 			tx.bufferMgr().pinNew(idx.centroidName(), new EmptyPageFormatter());
 
+		//Initialize centroids------------------------------------------------------------------------
 		RandomNonRepeatGenerator RNRG = new RandomNonRepeatGenerator(SiftBenchConstants.NUM_ITEMS);
 		Map<Integer, Integer> M = new HashMap<>();
 		for (int i = 0; i < IVFSq8DirectIndex.NUM_CENTROIDS; ++i){
@@ -86,7 +87,9 @@ public class StoredProcedureUtils {
 			}
 		}
 		test_ts.close();
+		//----------------------------------------------------------------------------------------------
 
+		//Refine centroids------------------------------------------------------------------------------
 		int iteration = 2;
 
 		for (int i = 0; i < iteration; i++){
@@ -145,6 +148,8 @@ public class StoredProcedureUtils {
 			
 			ts.close();
 		}
+		//----------------------------------------------------------------------------------------------
+
 
 		// Build the index
 		// Write the records into their corresponding clusters (tables)

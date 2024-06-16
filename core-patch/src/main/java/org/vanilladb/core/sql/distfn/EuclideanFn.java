@@ -24,7 +24,7 @@ public class EuclideanFn extends DistanceFn {
         double sum_d = sum.reduceLanes(VectorOperators.ADD);
     
         // deal with tail of dim % SPECIES.length()
-        for (i=0 ; i < vec.dimension(); i++) {
+        for (; i < vec.dimension(); i++) {
             double diff = query.get(i) - vec.get(i);
             sum_d += diff * diff;
         }

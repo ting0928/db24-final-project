@@ -3,6 +3,7 @@ package org.vanilladb.core.sql;
 import static java.sql.Types.VARCHAR;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 import org.vanilladb.core.util.ByteHelper;
 
@@ -95,11 +96,9 @@ public class VectorConstant extends Constant implements Serializable {
         type = new VectorType(length);
         // vec = new ArrayList<>(length);
         vec = new float[length];
+        ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
         for (int i = 0; i < length; i++) {
-            byte[] floatAsBytes = new byte[Float.BYTES];
-            int offset = i * Float.BYTES;
-            System.arraycopy(bytes, offset, floatAsBytes, 0, Float.BYTES);
-            vec[i] = ByteHelper.toFloat(floatAsBytes);
+            vec[i] = byteBuffer.getFloat();
         }
     }
 

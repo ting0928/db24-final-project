@@ -23,6 +23,7 @@ import java.util.PriorityQueue;
 
 import static org.vanilladb.core.sql.RecordComparator.DIR_DESC;
 
+import org.vanilladb.bench.benchmarks.sift.SiftBenchConstants;
 import org.vanilladb.bench.util.RandomNonRepeatGenerator;
 import org.vanilladb.core.query.algebra.Plan;
 import org.vanilladb.core.query.algebra.Scan;
@@ -70,7 +71,7 @@ public class StoredProcedureUtils {
 		// TODO: initialize the centroids in a better way
 		// for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i)
 		// 	idx.setCentroidVector(i, VectorConstant.normal(dim, 128, 64));
-		RandomNonRepeatGenerator RNRG = new RandomNonRepeatGenerator(9000);
+		RandomNonRepeatGenerator RNRG = new RandomNonRepeatGenerator(SiftBenchConstants.NUM_ITEMS);
 		Map<Integer, Integer> M = new HashMap<>();
 		for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i){
 			int random_number = RNRG.next();
@@ -87,14 +88,6 @@ public class StoredProcedureUtils {
 				idx.setCentroidVector(M.get(index), v);
 			}
 		}
-
-		//For testing  refine----------------------------------------------------------------------
-		// for (int i = 0; i < 512; i++){
-		// 	test_ts.next();
-		// 	VectorConstant v = new VectorConstant((float[])test_ts.getVal("i_emb").asJavaVal());
-		// 	idx.setCentroidVector(i, v);
-		// }
-		//------------------------------------------------------------------------------------------
 		test_ts.close();
 
 		// TODO: refine the centroids by K-means. It is recommended to log each iteration
@@ -110,7 +103,7 @@ public class StoredProcedureUtils {
 				sum[j] =  VectorConstant.zeros(128);
 			}
 
-			int [] num_of_points = new int[512];
+			int [] num_of_points = new int[IVFFlatIndex.NUM_CENTROIDS];
 
 			//cluster the data points
 			ts.beforeFirst();
@@ -135,7 +128,7 @@ public class StoredProcedureUtils {
 						min_dist = distance;
 						belongsTo = j;
 					}
-					if (j == 511)
+					if (j == IVFFlatIndex.NUM_CENTROIDS - 1)
 						break;
 				}
 

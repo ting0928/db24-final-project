@@ -23,6 +23,7 @@ import java.util.PriorityQueue;
 
 import static org.vanilladb.core.sql.RecordComparator.DIR_DESC;
 
+import org.vanilladb.bench.util.RandomNonRepeatGenerator;
 import org.vanilladb.core.query.algebra.Plan;
 import org.vanilladb.core.query.algebra.Scan;
 import org.vanilladb.core.query.algebra.TablePlan;
@@ -67,10 +68,97 @@ public class StoredProcedureUtils {
 			tx.bufferMgr().pinNew(idx.centroidName(), new EmptyPageFormatter());
 
 		// TODO: initialize the centroids in a better way
-		for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i)
-			idx.setCentroidVector(i, VectorConstant.normal(dim, 128, 64));
+		// for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i)
+		// 	idx.setCentroidVector(i, VectorConstant.normal(dim, 128, 64));
+		RandomNonRepeatGenerator RNRG = new RandomNonRepeatGenerator(9000);
+		Map<Integer, Integer> M = new HashMap<>();
+		for (int i = 0; i < IVFFlatIndex.NUM_CENTROIDS; ++i){
+			int random_number = RNRG.next();
+			M.put(random_number,i);
+		}
+		
+		Plan test_tp = new TablePlan(tableName, tx);
+		Scan test_ts = test_tp.open();
+		test_ts.beforeFirst();
+		while(test_ts.next()){
+			int index = (Integer)test_ts.getVal("i_id").asJavaVal();
+			if(M.containsKey(index)){
+				VectorConstant v = new VectorConstant((float[])test_ts.getVal("i_emb").asJavaVal());
+				idx.setCentroidVector(M.get(index), v);
+			}
+		}
+
+		//For testing  refine----------------------------------------------------------------------
+		// for (int i = 0; i < 512; i++){
+		// 	test_ts.next();
+		// 	VectorConstant v = new VectorConstant((float[])test_ts.getVal("i_emb").asJavaVal());
+		// 	idx.setCentroidVector(i, v);
+		// }
+		//------------------------------------------------------------------------------------------
+		test_ts.close();
 
 		// TODO: refine the centroids by K-means. It is recommended to log each iteration
+		int iteration = 2;
+
+		for (int i = 0; i < iteration; i++){
+			System.err.print("Iteration " + i + "\n");
+			Plan tp = new TablePlan(tableName, tx);
+			Scan ts = tp.open();
+
+			float[][] sum;
+			sum = new float[IVFFlatIndex.NUM_CENTROIDS][128];
+			
+			int [] num_of_points;
+			num_of_points = new int[512];
+
+			//cluster the data points
+			ts.beforeFirst();
+			while(ts.next()){
+				float[] temp = new float[128];	// a copy of a record of the table
+
+				// Two field:
+				// 1: i_emb(VectorConstant) 
+				// 2: i_id(IntegerConstant)
+
+				temp = (float[])ts.getVal("i_emb").asJavaVal();
+
+				float min_dist = Float.MAX_VALUE;
+				int belongsTo = 0;
+
+				for (int j  = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+					float[] center = (float[])idx.getCentroidVector(j).asJavaVal();
+					if(calculateEuclideanDistance(center, temp) < min_dist){
+						min_dist = calculateEuclideanDistance(center, temp);
+						belongsTo = j;
+					}
+					if (j == 511)
+						break;
+				}
+
+				num_of_points[belongsTo]++;
+				for (int j = 0; j < 128; j++){
+					sum[belongsTo][j] += temp[j];
+				}
+
+				if ((Integer)ts.getVal("i_id").asJavaVal() % 900 == 0)
+					System.err.print((Integer)ts.getVal("i_id").asJavaVal() + "/900000\r");
+
+			}
+
+			//Update centroid
+			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+				System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
+				for(int k = 0; k < 128; k++){
+					sum[j][k] = sum[j][k]/num_of_points[j];
+				}
+			}
+			for(int j = 0; j < IVFFlatIndex.NUM_CENTROIDS; j++){
+				VectorConstant v = new VectorConstant(sum[j]);
+				idx.setCentroidVector(j, v);
+			}
+			
+			ts.close();
+		}
 
 		// Build the index
 		// Write the records into their corresponding clusters (tables)
@@ -187,4 +275,21 @@ public class StoredProcedureUtils {
 	public static int executeInsert(InsertData sql, Transaction tx) {
 		return VanillaDb.newPlanner().executeInsert(sql, tx);
 	}
+
+	public static float calculateEuclideanDistance(float[] array1, float[] array2) {
+        // 檢查兩個陣列的長度是否相同
+        if (array1.length != array2.length) {
+            throw new IllegalArgumentException("兩個陣列的長度必須相同");
+        }
+
+        // 計算平方差的和
+        float sum = 0.0f;
+        for (int i = 0; i < array1.length; i++) {
+            float diff = array1[i] - array2[i];
+            sum += diff * diff;
+        }
+
+        // 返回平方根
+        return (float)Math.sqrt(sum);
+    }
 }

@@ -235,8 +235,14 @@ public class VectorConstant extends Constant implements Serializable {
 
     public Constant div_by_int(int n) {
         float[] res = new float[dimension()];
-        for (int i = 0; i < dimension(); i++) {
-            res[i] = this.get(i) / n;
+        if(n!=0){
+            for (int i = 0; i < dimension(); i++) {
+                res[i] = this.get(i) / n;
+            }
+        }else{
+            for (int i = 0; i < dimension(); i++) {
+                res[i] = this.get(i);
+            }
         }
         return new VectorConstant(res);
     }

@@ -132,19 +132,30 @@ public class StoredProcedureUtils {
 				num_of_points[belongsTo]++;
 				sum[belongsTo] = (VectorConstant)sum[belongsTo].add(temp);
 
-				// if ((Integer)ts.getVal("i_id").asJavaVal() % 900 == 0)
-				// 	System.err.print((Integer)ts.getVal("i_id").asJavaVal() + "/900000\r");
+				//Update centroid (Mini-batch kmeans)
+				if (((Integer)ts.getVal("i_id").asJavaVal()) % 10000 == 0){
+					VectorConstant[] avg = new VectorConstant[IVFSq8DirectIndex.NUM_CENTROIDS];
+					for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+						System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
+						avg[j] = (VectorConstant)sum[j].div_by_int(num_of_points[j]);
+					}
+					for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+						if(num_of_points[j] != 0){
+							idx.setCentroidVector(j, avg[j]);
+						}
+					}
+				}
 
 			}
 
-			//Update centroid
-			for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
-				// System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
-				sum[j] = (VectorConstant)sum[j].div_by_int(num_of_points[j]);
-			}
-			for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
-				idx.setCentroidVector(j, sum[j]);
-			}
+			// Update centroid
+			// for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+			// 	// System.err.print("number of points: " + num_of_points[j] + " in" + " cluster " + j + "\n");
+			// 	sum[j] = (VectorConstant)sum[j].div_by_int(num_of_points[j]);
+			// }
+			// for(int j = 0; j < IVFSq8DirectIndex.NUM_CENTROIDS; j++){
+			// 	idx.setCentroidVector(j, sum[j]);
+			// }
 			
 			ts.close();
 		}
